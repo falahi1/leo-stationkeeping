@@ -35,16 +35,16 @@ The Streamlit app supports four satellite families live: **Satellogic ÑuSat**, 
 | Altitude decay rate (SGP4, 7-day fit) | **0.143 km/day** |
 | Annual altitude loss | 52.2 km/yr |
 
-### Stationkeeping budget (Phase 2, ±5 km deadband, Isp = 220 s, 50 kg)
+### Stationkeeping budget (Phase 2, ±5 km deadband, Isp = 65 s, 40 kg — cold gas N₂)
 
 | Quantity | Value |
 |---|---|
 | ΔV per burn (5 km raise) | ~2.8 m/s |
 | Burn frequency | ~10 burns/year |
-| Propellant per burn | ~0.065 kg |
+| Propellant per burn | ~0.175 kg |
 | **ΔV/year (steady-state)** | **~29 m/s/yr** |
-| Propellant/year | ~0.65 kg/yr  (1.3% of wet mass) |
-| Mission life (10% prop budget) | ~7–8 years |
+| Propellant/year | ~1.75 kg/yr  (4.4% of wet mass) |
+| Mission life (10% prop budget) | ~2–3 years |
 
 ### Propagator comparison
 
@@ -143,7 +143,7 @@ The orbital period follows from the circumference:
 T = 2π r / v = 2π × 6808 / 7.652 = 5592 s ≈ 93.2 min
 ```
 
-This matches NUSAT-26's TLE mean motion of 15.44 rev/day exactly — confirming the TLE is self-consistent.
+This matches NUSAT-26's TLE mean motion of 15.46 rev/day exactly — confirming the TLE is self-consistent.
 
 ---
 
@@ -362,21 +362,21 @@ Rearranging for the propellant used in a single burn:
 Δm = m_current × ( 1 − exp(−ΔV / (Isp × g₀)) )
 ```
 
-**Worked example — 5 km raise, Isp = 220 s (hydrazine monoprop), m = 50 kg:**
+**Worked example — NUSAT-26, 5 km raise, Isp = 65 s (cold gas N₂), m = 40 kg:**
 
 ```
-Isp × g₀ = 220 × 9.807 = 2157.5 m/s
+Isp × g₀ = 65 × 9.807 = 637.5 m/s
 
-Δm = 50 × (1 − exp(−2.8 / 2157.5))
-   = 50 × (1 − exp(−0.001298))
-   = 50 × 0.001297
-   ≈ 0.065 kg per burn
+Δm = 40 × (1 − exp(−2.8 / 637.5))
+   = 40 × (1 − exp(−0.004392))
+   = 40 × 0.004382
+   ≈ 0.175 kg per burn
 ```
 
 With ~10 burns/year (at ±5 km deadband, raise-to-target strategy):
 
 ```
-propellant/year ≈ 10 × 0.065 = 0.65 kg/yr  ≈ 1.3% of wet mass
+propellant/year ≈ 10 × 0.175 = 1.75 kg/yr  ≈ 4.4% of wet mass
 ```
 
 ---
