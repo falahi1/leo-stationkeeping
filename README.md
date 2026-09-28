@@ -81,7 +81,7 @@ On first run, `skyfield` will download two small data files (~1 MB); these are c
 ## Method
 
 ### Phase 1 — SGP4 propagation
-- **TLE source:** CelesTrak GP data API (saved in `data/nusat26_tle.txt` with retrieval date for reproducibility)
+- **TLE source:** Space-Track.org GP catalogue (requires free account; credentials passed via `st.secrets`); `data/nusat26_tle.txt` contains a saved TLE for offline reproducibility
 - **Propagator:** `sgp4` library (Vallado's implementation of SGP4/SDP4)
 - **Coordinate frame:** ECI; altitude = |**r**| − 6371 km
 - **Ground track:** `skyfield` converts ECI → geodetic lat/lon via WGS84; coastlines from Natural Earth 110 m GeoJSON
