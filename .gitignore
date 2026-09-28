@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit secrets (never commit credentials)
+.streamlit/secrets.toml
+
+# Claude Code internal
+.claude/
+
+# Skyfield data cache (downloaded automatically on first run)
+skyfield-data/
+finals2000A.all
+Leap_Second.dat
+
+# Generated figures (reproduced by running the app)
+figures/*.png
+figures/*.pdf
+
+# Course notes (personal, not part of the public project)
+Space_Mechanics/
+
+# Internal project docs (not for public repo)
+CLAUDE.md
+LEARNING_LOG.md

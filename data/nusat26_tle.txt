@@ -1,0 +1,17 @@
+# NUSAT-26 (M Somerville) — Satellogic ÑuSat
+# Retrieved from CelesTrak GP data API: 2026-09-27
+# URL: https://celestrak.org/NORAD/elements/gp.php?NAME=NUSAT-&FORMAT=TLE
+#
+# This TLE is saved here so results are reproducible.
+# A freshly fetched TLE will have a different epoch and will give slightly different numbers.
+#
+# Key parameters at epoch:
+#   Altitude:      ~437 km
+#   Inclination:   97.23 deg (sun-synchronous)
+#   Period:        93.2 min
+#   Decay rate:    0.143 km/day (measured from 7-day SGP4 propagation)
+#   B* drag term:  5.09e-3
+
+NUSAT-26 (M SOMERVILLE)
+1 52184U 22033AD  26269.60424588  .00024559  00000+0  50917-3 0  9991
+2 52184  97.2277 348.1020 0004438 222.9360 137.1544 15.45714027120359
