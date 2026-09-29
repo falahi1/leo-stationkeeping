@@ -1625,8 +1625,9 @@ else:
                 "<p style='color:#a8adc0;font-size:0.82rem;line-height:1.6;margin:0;'>"
                 "The <code style='color:#c8cfe0;background:#0d0f1a;padding:1px 4px;border-radius:3px;'>sgp4</code> "
                 "Python library (Vallado implementation) propagates the TLE through 7 days at 60-second steps. "
-                "ECI positions are converted to geodetic altitude using the WGS-84 ellipsoid. "
-                "Orbit-averaged altitude gives the smooth decay curve.</p>"
+                "Altitude = |<b>r</b>| − 6371 km (spherical Earth). "
+                "Orbit-averaged altitude gives the smooth decay curve. "
+                "(The ground track uses skyfield's WGS-84 ellipsoid for lat/lon conversion.)</p>"
                 "</div>",
                 unsafe_allow_html=True,
             )
@@ -1652,11 +1653,12 @@ else:
                 "<div style='background:#13151f;border:1px solid #1e2130;border-radius:8px;padding:16px;margin-bottom:12px;'>"
                 "<p style='color:#00b4d8;font-weight:700;font-size:0.88rem;margin:0 0 8px 0;'>Stationkeeping (Phase 2)</p>"
                 "<p style='color:#a8adc0;font-size:0.82rem;line-height:1.6;margin:0;'>"
-                "Deadband strategy: the simulation runs day-by-day, applying the measured decay rate. "
-                "When altitude falls below the lower deadband boundary a Hohmann transfer raises it back to target. "
-                "Each burn uses the exact two-impulse ΔV formula (vis-viva), and propellant is "
-                "computed via the Tsiolkovsky rocket equation  (Δm = m₀·(1 − e^(−ΔV/v_e))). "
-                "Burn duration = Δm·v_e / F. "
+                "Deadband strategy: the simulation analytically computes the exact time until "
+                "altitude hits the lower deadband boundary, then fires a Hohmann transfer to raise it back. "
+                "Each burn uses the exact two-impulse ΔV formula (vis-viva). "
+                "Propellant is computed via the Tsiolkovsky rocket equation (Δm = m₀·(1 − e^(−ΔV/v_e))). "
+                "The trajectory change is instantaneous (impulsive approximation); burn duration "
+                "t = Δm·Isp·g₀ / F is calculated from thrust and shown in the maneuver log for reference. "
                 "A solar-activity multiplier scales the decay rate across the solar cycle.</p>"
                 "</div>",
                 unsafe_allow_html=True,
@@ -1698,7 +1700,8 @@ else:
                 "The USSA76 model is calibrated at F10.7 ≈ 150 SFU (mean solar). "
                 "Scaling applied: ρ = ρ_USSA76 · exp(β · (F10.7 − 150)), "
                 "where β ranges from 0.006 at 300 km to 0.020 at 700 km. "
-                "Live F10.7 is fetched from NOAA SWPC on first use.</p>"
+                "Live F10.7 is fetched from NOAA SWPC on first use. "
+                "β = 0.020 for alt ≥ 600 km.</p>"
                 "</div>",
                 unsafe_allow_html=True,
             )
@@ -1742,10 +1745,11 @@ else:
         with a1:
             st.markdown(
                 "<ul style='color:#a8adc0;font-size:0.83rem;line-height:1.75;padding-left:18px;margin:0;'>"
-                "<li>Decay rate assumed constant over the simulation window (weeks–months)</li>"
-                "<li>Stationkeeping burns are instantaneous (impulsive ΔV)</li>"
+                "<li>Decay rate assumed constant over the simulation window (valid for weeks–months)</li>"
+                "<li>Trajectory change at each burn is instantaneous (impulsive ΔV approximation); "
+                "actual burn duration is estimated from thrust and shown in the maneuver log</li>"
                 "<li>Only altitude (semi-major axis) is controlled — no inclination or RAAN corrections</li>"
-                "<li>USSA76 density model is static; NRLMSISE-00 would be more accurate</li>"
+                "<li>USSA76 density model with single-parameter F10.7 scaling; NRLMSISE-00 would be more accurate</li>"
                 "</ul>",
                 unsafe_allow_html=True,
             )

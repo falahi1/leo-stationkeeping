@@ -87,29 +87,31 @@ On first run, `skyfield` will download two small data files (~1 MB); these are c
 - **Ground track:** `skyfield` converts ECI → geodetic lat/lon via WGS84; coastlines from Natural Earth 110 m GeoJSON
 
 ### Phase 2 — Stationkeeping simulation
-- Decay rate fitted by linear regression to 7-day SGP4 orbit-averaged altitudes
+- **Decay rate:** 30-day TLE history from Space-Track `gp_history` endpoint (semi-major axis extracted from mean motion of each historical TLE, linear trend fitted); falls back to 7-day SGP4 orbit-averaged fit if history unavailable
 - Deadband control: impulsive Hohmann raise fires when altitude drops below the lower limit
 - ΔV: exact two-impulse Hohmann formula from vis-viva equation
 - Propellant: Tsiolkovsky rocket equation `dm = m(1 − exp(−ΔV / (Isp g₀)))`
+- **Burn duration:** `t_burn = Δm × Isp × g₀ / F` — finite burn time shown in maneuver log
 - Steady-state ΔV/year: `ṙ × 365.25 × v_circ / (2a)` — independent of window size
+- **Solar activity multiplier:** scales decay rate from 0.3× (solar min) to 3.0× (solar max)
 
-Simulation defaults (Isp and wet mass) are drawn from public mission documentation for each satellite family:
+Simulation defaults (Isp, wet mass, thrust) are drawn from public mission documentation for each satellite family:
 
-| Satellite family | Wet mass | Propulsion | Isp | Source |
-|---|---|---|---|---|
-| Satellogic ÑuSat | 40 kg | Cold gas (N₂) | 65 s | Satellogic public mission docs |
-| Planet Labs Dove | 5.8 kg | Cold gas (Dove+/Pelican) | 60 s | Planet Labs public specs |
-| Spire LEMUR-2 | 4.5 kg | Cold gas | 55 s | Spire Global public specs |
-| ISS | 420 000 kg | UDMH/N₂O₄ (Progress/Zvezda) | 310 s | NASA/Roscosmos ops data |
+| Satellite family | Wet mass | Propulsion | Isp | Thrust | Source |
+|---|---|---|---|---|---|
+| Satellogic ÑuSat | 40 kg | Cold gas (N₂) | 65 s | ~0.5 N | Satellogic public mission docs |
+| Planet Labs Dove | 5.8 kg | Cold gas (Dove+/Pelican) | 60 s | ~0.1 N | Planet Labs public specs |
+| Spire LEMUR-2 | 4.5 kg | Cold gas | 55 s | ~0.1 N | Spire Global public specs |
+| ISS | 420 000 kg | UDMH/N₂O₄ (Progress/Zvezda) | 310 s | ~400 N | NASA/Roscosmos ops data |
 
 Target altitude defaults to the satellite's current altitude from the TLE. All parameters are adjustable via sliders.
 
 ### Custom numerical propagator (`src/propagator.py`)
 - State vector: `[x, y, z, vx, vy, vz]` (ECI, SI units), seeded from SGP4 at TLE epoch
 - Forces: two-body gravity · J2 oblateness (Vallado eq. 8-20) · atmospheric drag with rotating atmosphere
-- Atmosphere: piecewise exponential (USSA76, 11 layers, 200–700 km)
+- Atmosphere: USSA76 piecewise exponential (11 layers, 200–700 km), **scaled by live F10.7 solar flux** fetched from NOAA SWPC; sensitivity β increases with altitude (0.006/SFU at 300 km → 0.017/SFU at 600 km)
 - Integration: `scipy.integrate.solve_ivp` RK45, `rtol=1e-6`, `atol=1e-7`
-- Cd and A/m are user-tunable; B*-implied Cd·A/m shown for direct comparison
+- A/m slider seeded from satellite geometry estimate (bus dimensions → mean projected area = SA/4); **B\*-implied Cd·A/m** shown alongside as a reference target
 
 ---
 
@@ -435,14 +437,14 @@ The integrator is seeded from SGP4 at the TLE epoch. From that point it propagat
 - Stationkeeping simulation uses a constant decay rate — valid for short windows (~weeks)
 - Custom propagator uses a mean-solar-activity atmosphere; actual density varies by up to 10× with the solar cycle
 - Only J2 gravitational harmonic modelled; J3–J6, lunar/solar third-body, and SRP are omitted
-- All burns are modelled as instantaneous (impulsive); real thrusters fire over seconds to minutes
+- Trajectory change at each burn is instantaneous (impulsive ΔV approximation); burn duration is estimated from thrust and shown in the maneuver log for reference
 - Isp and wet mass default to values from public mission docs; actual values are proprietary and may differ
 
 ---
 
 ## Possible next steps
 
-- Replace USSA76 with NRLMSISE-00 (operational standard, driven by real F10.7 solar flux)
+- Replace USSA76 with NRLMSISE-00 (operational standard; the current scaling is a single-parameter approximation)
 - Integrate between burns with the custom propagator — remove the constant-decay assumption
 - Annual ΔV budget heatmap: sweep altitude × deadband, visualise the design trade space
 - J2 RAAN drift: propagate the orbital plane over 90 days, show SSO maintenance requirement

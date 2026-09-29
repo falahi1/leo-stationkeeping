@@ -317,7 +317,7 @@ def plot_results(name: str, res: dict) -> plt.Figure:
         f"Propellant   {prop_str}\n"
         f"Isp          {res['isp']:.0f} s  ·  Wet mass {res['wet_mass']:.0f} kg\n"
         f"Thrust       {res['thrust_n']:.2f} N  ·  Burn dur {res['avg_burn_dur_s']:.0f} s/burn\n"
-        f"Model: constant decay rate from 7-day SGP4 fit"
+        f"Model: constant decay rate (30-day TLE history or 7-day SGP4 fit)"
     )
     ax.text(
         0.01, 0.98, stats,
