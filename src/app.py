@@ -99,24 +99,28 @@ SATELLITE_SPECS = {
     "1": {  # Satellogic ÑuSat
         "wet_mass_kg": 40.0,
         "isp_s":       65,
+        "thrust_n":    0.5,   # cold-gas thruster, estimated ~0.5 N
         "prop_type":   "Cold gas (N₂)",
         "source":      "Satellogic public mission documentation (~40 kg, cold-gas propulsion)",
     },
     "2": {  # Planet Labs Dove
         "wet_mass_kg": 5.8,
         "isp_s":       60,
+        "thrust_n":    0.1,   # cold-gas thruster on 3U CubeSat, ~0.1 N
         "prop_type":   "Cold gas (Dove+ / Pelican; early Doves had no propulsion)",
         "source":      "Planet Labs public specifications (~5.8 kg 3U CubeSat)",
     },
     "3": {  # Spire LEMUR-2
         "wet_mass_kg": 4.5,
         "isp_s":       55,
+        "thrust_n":    0.1,   # cold-gas thruster on 3U CubeSat, ~0.1 N
         "prop_type":   "Cold gas",
         "source":      "Spire Global public specifications (~4.5 kg 3U CubeSat)",
     },
     "4": {  # ISS
         "wet_mass_kg": 420000.0,
         "isp_s":       310,
+        "thrust_n":    400.0, # Progress/Zvezda reboost engines, ~400 N combined
         "prop_type":   "UDMH/N₂O₄  (Zvezda main engines · Progress / Cygnus reboost)",
         "source":      "NASA/Roscosmos ISS operations data (~420 t, bipropellant reboost)",
     },
@@ -1256,14 +1260,20 @@ else:
             st.session_state.sk_isp = specs["isp_s"]
         if "sk_wet_mass" not in st.session_state:
             st.session_state.sk_wet_mass = specs["wet_mass_kg"]
+        if "sk_thrust_n" not in st.session_state:
+            st.session_state.sk_thrust_n = specs.get("thrust_n", 1.0)
+        if "sk_solar_factor" not in st.session_state:
+            st.session_state.sk_solar_factor = 1.0
 
         if st.button("Reset to defaults", key="btn_sk_reset"):
-            st.session_state.sk_target_alt = float(alt_default)
-            st.session_state.sk_half_width = 5.0
-            st.session_state.sk_duration   = 90
-            st.session_state.sk_isp        = specs["isp_s"]
-            st.session_state.sk_wet_mass   = specs["wet_mass_kg"]
-            st.session_state.sk_raise_to   = "top"
+            st.session_state.sk_target_alt   = float(alt_default)
+            st.session_state.sk_half_width   = 5.0
+            st.session_state.sk_duration     = 90
+            st.session_state.sk_isp          = specs["isp_s"]
+            st.session_state.sk_wet_mass     = specs["wet_mass_kg"]
+            st.session_state.sk_raise_to     = "top"
+            st.session_state.sk_thrust_n     = specs.get("thrust_n", 1.0)
+            st.session_state.sk_solar_factor = 1.0
 
         target_alt = st.slider(
             "Target altitude (km)",
@@ -1298,7 +1308,7 @@ else:
             ),
         )
 
-        adv_col, strat_col = st.columns([1, 1])
+        adv_col, strat_col, thrust_col = st.columns([1, 1, 1])
         with adv_col:
             wet_mass = st.number_input(
                 "Wet mass (kg)",
@@ -1321,14 +1331,37 @@ else:
                 key="sk_raise_to",
                 help="Top of band = fewer future burns. Target = simpler ops.",
             )
+        with thrust_col:
+            thrust_n = st.number_input(
+                "Thrust (N)",
+                min_value=0.01, max_value=100000.0,
+                value=specs.get("thrust_n", 1.0), step=0.01,
+                key="sk_thrust_n",
+                help=(
+                    "Thruster output force. Used to compute realistic burn duration "
+                    f"(not orbital mechanics). Default: {specs.get('thrust_n', 1.0)} N "
+                    f"({specs['prop_type']})."
+                ),
+            )
+
+        solar_factor = st.slider(
+            "Solar activity multiplier",
+            min_value=0.3, max_value=3.0,
+            value=1.0, step=0.1,
+            key="sk_solar_factor",
+            help=(
+                "Scales the measured SGP4 decay rate to simulate different solar conditions. "
+                "Solar minimum ≈ 0.3× (low drag),  mean solar = 1.0×,  solar maximum ≈ 3.0× (high drag)."
+            ),
+        )
 
         st.caption(
-            f"Isp and wet-mass defaults from **{specs['source']}**. "
+            f"Isp, wet-mass and thrust defaults from **{specs['source']}**. "
             "Adjust sliders to explore different configurations."
         )
 
         # Track whether params changed since last run
-        sk_params = (target_alt, half_width, duration, isp, wet_mass, raise_to)
+        sk_params = (target_alt, half_width, duration, isp, wet_mass, raise_to, thrust_n, solar_factor)
         params_changed = (
             st.session_state.sk_results is not None
             and st.session_state.get("sk_last_params") != sk_params
@@ -1344,6 +1377,8 @@ else:
                     isp=float(isp),
                     wet_mass=wet_mass,
                     raise_to=raise_to,
+                    thrust_n=float(thrust_n),
+                    solar_factor=float(solar_factor),
                     run_id=run_id,
                     show=False,
                 )
@@ -1359,15 +1394,18 @@ else:
 
             # ── Summary metric cards ───────────────────────────────────────
             st.divider()
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Maneuvers",    str(res["n_maneuvers"]))
-            m2.metric("Total ΔV",     f"{res['total_dv_ms']:.3f} m/s")
-            m3.metric("ΔV / year",    f"{res['dv_per_year_ms']:.2f} m/s/yr")
-            m4.metric("Propellant",   f"{res['prop_consumed']:.4f} kg")
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("Maneuvers",     str(res["n_maneuvers"]))
+            m2.metric("Total ΔV",      f"{res['total_dv_ms']:.3f} m/s")
+            m3.metric("ΔV / year",     f"{res['dv_per_year_ms']:.2f} m/s/yr")
+            m4.metric("Propellant",    f"{res['prop_consumed']:.3f} kg")
+            m5.metric("Avg burn dur.", f"{res['avg_burn_dur_s']:.0f} s")
 
             st.caption(
                 f"Decay rate: {res['decay_rate']:.4f} km/day  ·  "
+                f"Solar: {res['solar_factor']:.1f}×  ·  "
                 f"Isp: {res['isp']:.0f} s  ·  "
+                f"Thrust: {res['thrust_n']:.2f} N  ·  "
                 f"Wet mass: {res['wet_mass']:.1f} kg  ·  "
                 f"Run ID: {run_id}"
             )

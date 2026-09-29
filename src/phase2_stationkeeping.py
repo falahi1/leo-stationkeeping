@@ -102,21 +102,23 @@ def measure_decay_rate(line1: str, line2: str,
 # Core simulation engine
 # ---------------------------------------------------------------------------
 def simulate(
-    name:       str,
-    line1:      str,
-    line2:      str,
-    target_alt: float,    # km  — centre of deadband
-    half_width: float,    # km  — deadband = target ± half_width
-    duration:   float,    # days
-    isp:        float,    # s   — specific impulse
-    wet_mass:   float,    # kg  — spacecraft mass at start of simulation
-    raise_to:   str = "top",   # "top" → raise to upper limit; "target" → raise to centre
+    name:         str,
+    line1:        str,
+    line2:        str,
+    target_alt:   float,         # km  — centre of deadband
+    half_width:   float,         # km  — deadband = target ± half_width
+    duration:     float,         # days
+    isp:          float,         # s   — specific impulse
+    wet_mass:     float,         # kg  — spacecraft mass at start of simulation
+    raise_to:     str   = "top", # "top" → raise to upper limit; "target" → raise to centre
+    thrust_n:     float = 1.0,   # N   — thruster force (used for burn duration only)
+    solar_factor: float = 1.0,   # ×   — scales measured decay rate (0.3 = min, 1 = mean, 3 = max)
 ) -> dict:
     """
     Simulate stationkeeping for `duration` days.
     Returns a results dict with time series, maneuver log, and summary stats.
     """
-    decay_rate = measure_decay_rate(line1, line2)
+    decay_rate = measure_decay_rate(line1, line2) * solar_factor
 
     lower = target_alt - half_width
     upper = target_alt + half_width
@@ -150,9 +152,10 @@ def simulate(
         alt_raise = upper if raise_to == "top" else target_alt
 
         # Hohmann delta-V and propellant
-        dv  = hohmann_dv(lower, alt_raise)                   # m/s
-        v_e = isp * G0                                        # exhaust velocity (m/s)
-        dm  = mass * (1.0 - math.exp(-dv / v_e))             # kg consumed
+        dv       = hohmann_dv(lower, alt_raise)               # m/s
+        v_e      = isp * G0                                   # exhaust velocity (m/s)
+        dm       = mass * (1.0 - math.exp(-dv / v_e))         # kg consumed
+        t_burn_s = dm * v_e / thrust_n                        # s — finite burn duration
         mass = max(mass - dm, 0.0)
         total_dv += dv
 
@@ -161,6 +164,7 @@ def simulate(
             "From (km)":       round(lower, 2),
             "To (km)":         round(alt_raise, 2),
             "ΔV (m/s)":        round(dv, 3),
+            "Burn dur. (s)":   int(round(t_burn_s, 0)),
             "Propellant (kg)": round(dm, 4),
             "Mass after (kg)": round(mass, 3),
             "Cumul. ΔV (m/s)": round(total_dv, 3),
@@ -192,6 +196,11 @@ def simulate(
     prop_budget = wet_mass * 0.10
     days_budget = (prop_budget / prop_consumed * duration) if prop_consumed > 0 else float("inf")
 
+    avg_burn_dur_s = (
+        sum(m["Burn dur. (s)"] for m in maneuvers) / len(maneuvers)
+        if maneuvers else 0.0
+    )
+
     return {
         "ts":             np.array(ts),
         "alts":           np.array(alts),
@@ -209,6 +218,9 @@ def simulate(
         "duration":       duration,
         "isp":            isp,
         "wet_mass":       wet_mass,
+        "thrust_n":       thrust_n,
+        "solar_factor":   solar_factor,
+        "avg_burn_dur_s": avg_burn_dur_s,
     }
 
 
@@ -254,14 +266,14 @@ def plot_results(name: str, res: dict) -> plt.Figure:
         ax.scatter(burn_days, burn_from, color="#ef233c", s=45,
                    zorder=5, label="Maneuver")
 
-        # Annotate first burn with ΔV — label all if ≤10, else label first only
+        # Annotate first burn with ΔV + burn duration — label all if ≤10, else first only
         label_count = len(mvrs) if len(mvrs) <= 10 else 1
         for k, m in enumerate(mvrs[:label_count]):
             suffix = " (each)" if k == 0 and len(mvrs) > 1 else ""
             ax.annotate(
-                f"Δv = {m['ΔV (m/s)']:.2f} m/s{suffix}",
+                f"Δv = {m['ΔV (m/s)']:.2f} m/s{suffix}\n{m['Burn dur. (s)']} s",
                 xy=(m["Day"], m["From (km)"]),
-                xytext=(0, -20),
+                xytext=(0, -24),
                 textcoords="offset points",
                 fontsize=7.5, color="#ef233c", ha="center",
                 arrowprops=dict(arrowstyle="-", color="#ef233c",
@@ -287,18 +299,20 @@ def plot_results(name: str, res: dict) -> plt.Figure:
     prop_str = (f"{res['prop_consumed']:.3f} kg"
                 if res['prop_consumed'] < 1
                 else f"{res['prop_consumed']:.2f} kg")
-    # dv_per_km for annotation
     a_m       = (res["target_alt"] + 6371.0) * 1e3
     v_ms      = math.sqrt(398600.4418e9 / a_m)
     dv_per_km = v_ms * 1e3 / (2.0 * a_m)
+    sf = res["solar_factor"]
+    solar_tag = ("solar max" if sf > 1.5 else "solar min" if sf < 0.7 else "mean solar")
     stats = (
-        f"Decay rate   {res['decay_rate']:.3f} km/day\n"
+        f"Decay rate   {res['decay_rate']:.3f} km/day  [{sf:.1f}× {solar_tag}]\n"
         f"             ({dv_per_km * res['decay_rate']:.3f} m/s/day)\n"
         f"Maneuvers    {res['n_maneuvers']}\n"
         f"Total ΔV     {res['total_dv_ms']:.2f} m/s\n"
         f"ΔV/year      {res['dv_per_year_ms']:.1f} m/s/yr  (steady-state)\n"
         f"Propellant   {prop_str}\n"
         f"Isp          {res['isp']:.0f} s  ·  Wet mass {res['wet_mass']:.0f} kg\n"
+        f"Thrust       {res['thrust_n']:.2f} N  ·  Burn dur {res['avg_burn_dur_s']:.0f} s/burn\n"
         f"Model: constant decay rate from 7-day SGP4 fit"
     )
     ax.text(
@@ -330,26 +344,29 @@ def figure_path(run_id: str, folder: str = "figures") -> str:
 # Public run() — called by app.py and standalone main()
 # ---------------------------------------------------------------------------
 def run(
-    name:       str,
-    line1:      str,
-    line2:      str,
-    target_alt: float,
-    half_width: float,
-    duration:   float,
-    isp:        float,
-    wet_mass:   float,
-    raise_to:   str  = "top",
-    run_id:     str  = None,
-    show:       bool = True,
+    name:         str,
+    line1:        str,
+    line2:        str,
+    target_alt:   float,
+    half_width:   float,
+    duration:     float,
+    isp:          float,
+    wet_mass:     float,
+    raise_to:     str   = "top",
+    thrust_n:     float = 1.0,
+    solar_factor: float = 1.0,
+    run_id:       str   = None,
+    show:         bool  = True,
 ):
     """Simulate, plot, optionally save and show. Returns (fig, results)."""
     print(f"\nRunning stationkeeping simulation for {name}...")
     print(f"  Target alt   : {target_alt:.1f} km  ±{half_width:.1f} km")
     print(f"  Duration     : {duration:.0f} days")
     print(f"  Isp          : {isp:.0f} s    Wet mass: {wet_mass:.1f} kg")
+    print(f"  Thrust       : {thrust_n:.2f} N    Solar factor: {solar_factor:.1f}×")
 
     res = simulate(name, line1, line2, target_alt, half_width,
-                   duration, isp, wet_mass, raise_to)
+                   duration, isp, wet_mass, raise_to, thrust_n, solar_factor)
 
     print(f"  Decay rate   : {res['decay_rate']:.4f} km/day")
     print(f"  Maneuvers    : {res['n_maneuvers']}")
