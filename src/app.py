@@ -15,6 +15,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 
+import numpy as np
 import requests
 
 import matplotlib
@@ -99,30 +100,47 @@ SATELLITE_SPECS = {
     "1": {  # Satellogic ÑuSat
         "wet_mass_kg": 40.0,
         "isp_s":       65,
-        "thrust_n":    0.5,   # cold-gas thruster, estimated ~0.5 N
+        "thrust_n":    0.5,    # cold-gas thruster, estimated ~0.5 N
         "prop_type":   "Cold gas (N₂)",
         "source":      "Satellogic public mission documentation (~40 kg, cold-gas propulsion)",
+        # Dimensions ~0.45×0.45×0.70 m  →  surface area ≈ 1.66 m²
+        # Mean projected area (random tumble) = SA/4 ≈ 0.41 m²  →  A/m ≈ 0.010 m²/kg
+        "est_Am":      0.010,
+        "dims":        "0.45 × 0.45 × 0.70 m",
+        "mean_area_m2": 0.41,
     },
     "2": {  # Planet Labs Dove
         "wet_mass_kg": 5.8,
         "isp_s":       60,
-        "thrust_n":    0.1,   # cold-gas thruster on 3U CubeSat, ~0.1 N
+        "thrust_n":    0.1,    # cold-gas thruster on 3U CubeSat, ~0.1 N
         "prop_type":   "Cold gas (Dove+ / Pelican; early Doves had no propulsion)",
         "source":      "Planet Labs public specifications (~5.8 kg 3U CubeSat)",
+        # 3U CubeSat: 0.10×0.10×0.30 m  →  SA ≈ 0.14 m²,  mean area ≈ 0.035 m²
+        "est_Am":      0.006,
+        "dims":        "0.10 × 0.10 × 0.30 m  (3U)",
+        "mean_area_m2": 0.035,
     },
     "3": {  # Spire LEMUR-2
         "wet_mass_kg": 4.5,
         "isp_s":       55,
-        "thrust_n":    0.1,   # cold-gas thruster on 3U CubeSat, ~0.1 N
+        "thrust_n":    0.1,    # cold-gas thruster on 3U CubeSat, ~0.1 N
         "prop_type":   "Cold gas",
         "source":      "Spire Global public specifications (~4.5 kg 3U CubeSat)",
+        # 3U CubeSat: 0.10×0.10×0.30 m  →  mean area ≈ 0.035 m²
+        "est_Am":      0.008,
+        "dims":        "0.10 × 0.10 × 0.30 m  (3U)",
+        "mean_area_m2": 0.035,
     },
     "4": {  # ISS
         "wet_mass_kg": 420000.0,
         "isp_s":       310,
-        "thrust_n":    400.0, # Progress/Zvezda reboost engines, ~400 N combined
+        "thrust_n":    400.0,  # Progress/Zvezda reboost engines, ~400 N combined
         "prop_type":   "UDMH/N₂O₄  (Zvezda main engines · Progress / Cygnus reboost)",
         "source":      "NASA/Roscosmos ISS operations data (~420 t, bipropellant reboost)",
+        # Solar arrays dominate drag area: ~2500 m² effective mean projected area
+        "est_Am":      0.006,
+        "dims":        "~73 m wingspan (solar arrays)",
+        "mean_area_m2": 2500.0,
     },
 }
 
@@ -139,7 +157,78 @@ _BROWSER_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-_ST_LOGIN = "https://www.space-track.org/ajaxauth/login"
+_ST_LOGIN    = "https://www.space-track.org/ajaxauth/login"
+_ST_BASE     = "https://www.space-track.org/basicspacedata/query/class"
+_F107_NOAA   = "https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json"
+
+
+def _fetch_f107() -> float:
+    """
+    Fetch current F10.7 solar flux (SFU) from NOAA SWPC.
+    Returns 150.0 (mean solar) on any failure.
+    """
+    try:
+        resp = requests.get(_F107_NOAA, timeout=8, headers=_BROWSER_HEADERS)
+        resp.raise_for_status()
+        data = resp.json()
+        if data:
+            latest = data[-1]
+            for key in ("f10.7", "F10.7", "f107", "radio_flux"):
+                if latest.get(key) is not None:
+                    return float(latest[key])
+    except Exception:
+        pass
+    return 150.0
+
+
+def _spacetrack_decay_rate(norad_id: int) -> float | None:
+    """
+    Measure decay rate (km/day, positive) from 30-day Space-Track TLE history.
+    Extracts semi-major axis from each TLE's mean motion, fits linear trend.
+    Returns None if Space-Track is unavailable or fewer than 3 TLEs exist.
+    """
+    user = st.secrets.get("SPACETRACK_USER", "")
+    pwd  = st.secrets.get("SPACETRACK_PASS", "")
+    if not user or not pwd:
+        return None
+    try:
+        sess = requests.Session()
+        sess.headers.update(_BROWSER_HEADERS)
+        login = sess.post(_ST_LOGIN, data={"identity": user, "password": pwd}, timeout=20)
+        if "Failed" in login.text:
+            return None
+        url = (
+            f"{_ST_BASE}/gp_history/NORAD_CAT_ID/{norad_id}"
+            f"/EPOCH/%3Enow-30/orderby/EPOCH%20asc/FORMAT/json"
+        )
+        resp = sess.get(url, timeout=30)
+        resp.raise_for_status()
+        records = resp.json()
+        if not records or len(records) < 3:
+            return None
+        mu_km3 = 398600.4418
+        altitudes, days = [], []
+        t0 = None
+        for rec in records:
+            try:
+                n_rev_day = float(rec["MEAN_MOTION"])
+                n_rad_s   = n_rev_day * 2 * math.pi / 86400.0
+                a_km      = (mu_km3 / n_rad_s ** 2) ** (1 / 3)
+                alt_km    = a_km - 6371.0
+                ep_str    = rec["EPOCH"][:19].replace("T", " ")
+                ep        = datetime.strptime(ep_str, "%Y-%m-%d %H:%M:%S")
+                if t0 is None:
+                    t0 = ep
+                days.append((ep - t0).total_seconds() / 86400.0)
+                altitudes.append(alt_km)
+            except Exception:
+                continue
+        if len(altitudes) < 3:
+            return None
+        slope = np.polyfit(days, altitudes, 1)[0]   # km/day (negative = decaying)
+        return max(-slope, 0.005)
+    except Exception:
+        return None
 
 
 def _parse_tles(text: str, name_filter=None) -> list:
@@ -692,6 +781,7 @@ for key, default in {
     "sk_results":        None,
     "sk_last_params":    None,
     "compare_bytes":     None,
+    "f107_value":        None,   # fetched from NOAA on first use
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -1030,7 +1120,25 @@ else:
             "Compare against SGP4 (B*-calibrated)"
         )
 
-        cmp_c1, cmp_c2 = st.columns(2)
+        # ── B*-implied Cd·A/m reference ──────────────────────────────────
+        sat_bstar = Satrec.twoline2rv(line1, line2).bstar
+        CdAm_bstar = abs(sat_bstar) * 2.0 / 2.461e-5   # m²/kg
+        est_Am = specs.get("est_Am", 0.010)
+        st.info(
+            f"**B\\*-implied Cd·A/m = {CdAm_bstar:.4f} m²/kg** — derived from TLE drag term "
+            f"(B\\* = {sat_bstar:.3e} /Rₑ). "
+            f"**Geometry estimate: {est_Am:.3f} m²/kg** "
+            f"({specs.get('dims','—')}, mean projected area "
+            f"{specs.get('mean_area_m2', 0):.3g} m², mass {specs['wet_mass_kg']} kg). "
+            f"Set A/m below to match SGP4 decay rate."
+        )
+
+        # ── F10.7 fetch (once per session) ───────────────────────────────
+        if st.session_state.f107_value is None:
+            with st.spinner("Fetching F10.7 solar flux from NOAA SWPC…"):
+                st.session_state.f107_value = _fetch_f107()
+
+        cmp_c1, cmp_c2, cmp_c3 = st.columns(3)
         with cmp_c1:
             cmp_cd = st.slider(
                 "Drag coefficient  Cd",
@@ -1043,11 +1151,29 @@ else:
             cmp_am = st.slider(
                 "Area-to-mass ratio  A/m  (m²/kg)",
                 min_value=0.001, max_value=0.050,
-                value=0.010, step=0.001,
+                value=est_Am, step=0.001,
                 key="cmp_am",
                 help=(
-                    "Tune until RK45 decay rate matches SGP4. "
-                    "Large microsat (~40 kg) ≈ 0.010.  CubeSat (~5 kg) ≈ 0.006."
+                    f"Geometry estimate for this satellite: {est_Am:.3f} m²/kg "
+                    f"({specs.get('dims','—')}). "
+                    f"B*-implied: {CdAm_bstar:.4f} m²/kg. "
+                    "Tune until RK45 decay rate matches SGP4."
+                ),
+            )
+        with cmp_c3:
+            f107_default = float(st.session_state.f107_value or 150.0)
+            f107_label   = ("solar min" if f107_default < 100 else
+                            "solar max" if f107_default > 200 else "mean solar")
+            cmp_f107 = st.slider(
+                "F10.7 solar flux  (SFU)",
+                min_value=50.0, max_value=300.0,
+                value=f107_default, step=5.0,
+                key="cmp_f107",
+                help=(
+                    f"Current value fetched from NOAA SWPC: {f107_default:.0f} SFU "
+                    f"[{f107_label}]. "
+                    "Scales atmospheric density — USSA76 is calibrated to 150 SFU. "
+                    "Solar min ≈ 70 SFU, solar max ≈ 200–250 SFU."
                 ),
             )
 
@@ -1058,7 +1184,7 @@ else:
                 try:
                     fig_cmp = _compare_propagators(
                         name, line1, line2,
-                        days=7.0, Cd=cmp_cd, Am=cmp_am,
+                        days=7.0, Cd=cmp_cd, Am=cmp_am, f107=cmp_f107,
                     )
                     st.session_state.compare_bytes = fig_to_bytes(fig_cmp)
                 except Exception as _e:
@@ -1368,7 +1494,9 @@ else:
         )
 
         if st.button("Run Simulation", key="btn_sk", type="primary"):
-            with st.spinner("Measuring decay rate and simulating maneuvers..."):
+            with st.spinner("Fetching 30-day TLE history and simulating maneuvers..."):
+                hist_rate = _spacetrack_decay_rate(info["norad_id"])
+                decay_src = "30-day TLE history" if hist_rate else "7-day SGP4 fit"
                 fig_sk, res_sk = _run_sk(
                     name, line1, line2,
                     target_alt=target_alt,
@@ -1379,12 +1507,14 @@ else:
                     raise_to=raise_to,
                     thrust_n=float(thrust_n),
                     solar_factor=float(solar_factor),
+                    decay_rate_override=hist_rate,
                     run_id=run_id,
                     show=False,
                 )
             st.session_state.sk_bytes       = fig_to_bytes(fig_sk)
             st.session_state.sk_results     = res_sk
             st.session_state.sk_last_params = sk_params
+            st.session_state["sk_decay_src"] = decay_src
 
         if params_changed:
             st.warning("Parameters changed — click Run Simulation to update results.")
@@ -1401,8 +1531,9 @@ else:
             m4.metric("Propellant",    f"{res['prop_consumed']:.3f} kg")
             m5.metric("Avg burn dur.", f"{res['avg_burn_dur_s']:.0f} s")
 
+            decay_src = st.session_state.get("sk_decay_src", "7-day SGP4 fit")
             st.caption(
-                f"Decay rate: {res['decay_rate']:.4f} km/day  ·  "
+                f"Decay rate: {res['decay_rate']:.4f} km/day  [{decay_src}]  ·  "
                 f"Solar: {res['solar_factor']:.1f}×  ·  "
                 f"Isp: {res['isp']:.0f} s  ·  "
                 f"Thrust: {res['thrust_n']:.2f} N  ·  "

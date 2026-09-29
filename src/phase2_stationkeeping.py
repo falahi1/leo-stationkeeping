@@ -110,15 +110,19 @@ def simulate(
     duration:     float,         # days
     isp:          float,         # s   — specific impulse
     wet_mass:     float,         # kg  — spacecraft mass at start of simulation
-    raise_to:     str   = "top", # "top" → raise to upper limit; "target" → raise to centre
-    thrust_n:     float = 1.0,   # N   — thruster force (used for burn duration only)
-    solar_factor: float = 1.0,   # ×   — scales measured decay rate (0.3 = min, 1 = mean, 3 = max)
+    raise_to:             str   = "top", # "top" → raise to upper limit; "target" → raise to centre
+    thrust_n:             float = 1.0,   # N   — thruster force (used for burn duration only)
+    solar_factor:         float = 1.0,   # ×   — scales measured decay rate (0.3 = min, 1 = mean, 3 = max)
+    decay_rate_override:  float = None,  # km/day — if set, skips internal measurement (use history fit)
 ) -> dict:
     """
     Simulate stationkeeping for `duration` days.
     Returns a results dict with time series, maneuver log, and summary stats.
     """
-    decay_rate = measure_decay_rate(line1, line2) * solar_factor
+    if decay_rate_override is not None:
+        decay_rate = decay_rate_override * solar_factor
+    else:
+        decay_rate = measure_decay_rate(line1, line2) * solar_factor
 
     lower = target_alt - half_width
     upper = target_alt + half_width
@@ -352,11 +356,12 @@ def run(
     duration:     float,
     isp:          float,
     wet_mass:     float,
-    raise_to:     str   = "top",
-    thrust_n:     float = 1.0,
-    solar_factor: float = 1.0,
-    run_id:       str   = None,
-    show:         bool  = True,
+    raise_to:            str   = "top",
+    thrust_n:            float = 1.0,
+    solar_factor:        float = 1.0,
+    decay_rate_override: float = None,
+    run_id:              str   = None,
+    show:                bool  = True,
 ):
     """Simulate, plot, optionally save and show. Returns (fig, results)."""
     print(f"\nRunning stationkeeping simulation for {name}...")
@@ -366,7 +371,8 @@ def run(
     print(f"  Thrust       : {thrust_n:.2f} N    Solar factor: {solar_factor:.1f}×")
 
     res = simulate(name, line1, line2, target_alt, half_width,
-                   duration, isp, wet_mass, raise_to, thrust_n, solar_factor)
+                   duration, isp, wet_mass, raise_to, thrust_n, solar_factor,
+                   decay_rate_override)
 
     print(f"  Decay rate   : {res['decay_rate']:.4f} km/day")
     print(f"  Maneuvers    : {res['n_maneuvers']}")

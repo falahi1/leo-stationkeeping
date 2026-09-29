@@ -68,28 +68,54 @@ _ATM = np.array([
 ], dtype=float)
 
 
-def atm_density(alt_m: float) -> float:
+def _f107_scale(alt_km: float, f107: float, f107_ref: float = 150.0) -> float:
+    """
+    Scale USSA76 density for actual F10.7 vs reference (150 SFU, mean solar).
+    Uses empirical exponential sensitivity:  scale = exp(β × ΔF10.7)
+    β increases with altitude (more sensitive at higher altitudes).
+    Based on standard atmospheric model solar-activity sensitivity data.
+    """
+    if f107 == f107_ref:
+        return 1.0
+    if alt_km < 200:
+        beta = 0.004
+    elif alt_km < 300:
+        beta = 0.006
+    elif alt_km < 400:
+        beta = 0.010
+    elif alt_km < 500:
+        beta = 0.013
+    elif alt_km < 600:
+        beta = 0.017
+    else:
+        beta = 0.020
+    return math.exp(beta * (f107 - f107_ref))
+
+
+def atm_density(alt_m: float, f107: float = 150.0) -> float:
     """
     Atmospheric density (kg/m³) at altitude alt_m (metres).
-    Piecewise exponential: within each layer rho = rho_ref * exp(-(h-h0)/H).
-    Returns ~0 for altitudes below the table minimum.
+    Piecewise exponential (USSA76) scaled to actual F10.7 solar flux.
+    f107=150 → nominal USSA76 (mean solar activity).
     """
     alt_km = alt_m / 1e3
     idx = int(np.searchsorted(_ATM[:, 0], alt_km, side="right")) - 1
     idx = max(0, min(idx, len(_ATM) - 1))
     h0, rho0, H = _ATM[idx]
-    return rho0 * math.exp(-(alt_km - h0) / H)
+    rho = rho0 * math.exp(-(alt_km - h0) / H)
+    return rho * _f107_scale(alt_km, f107)
 
 
 # ---------------------------------------------------------------------------
 # Equations of motion
 # ---------------------------------------------------------------------------
-def _eom(t: float, state: list, Cd_Am: float) -> list:
+def _eom(t: float, state: list, Cd_Am: float, f107: float) -> list:
     """
     Equations of motion in ECI frame.  SI units (m, m/s, s).
 
     State vector: [x, y, z, vx, vy, vz]
     Cd_Am:  Cd * A/m  (m²/kg) — combined drag parameter
+    f107:   F10.7 solar flux index (SFU) — scales atmospheric density
 
     Returns: [vx, vy, vz, ax, ay, az]
     """
@@ -121,7 +147,7 @@ def _eom(t: float, state: list, Cd_Am: float) -> list:
     vrz = vz
     vr  = math.sqrt(vrx*vrx + vry*vry + vrz*vrz)
 
-    rho      = atm_density(r - RE_MEAN)
+    rho      = atm_density(r - RE_MEAN, f107)
     drag_fac = -0.5 * rho * Cd_Am * vr    # multiply by v_rel vector below
     ax      += drag_fac * vrx
     ay      += drag_fac * vry
@@ -140,6 +166,7 @@ def propagate(
     step_s: int   = 60,
     Cd:     float = 2.2,
     Am:     float = 0.010,
+    f107:   float = 150.0,
 ) -> tuple:
     """
     Integrate equations of motion from TLE epoch.
@@ -184,7 +211,7 @@ def propagate(
         state0,
         method       = "RK45",
         t_eval       = t_eval,
-        args         = (Cd * Am,),
+        args         = (Cd * Am, f107),
         rtol         = 1e-6,
         atol         = 1e-7,
         max_step     = float(step_s),
@@ -217,6 +244,7 @@ def decay_rate(
     step_s: int   = 60,
     Cd:     float = 2.2,
     Am:     float = 0.010,
+    f107:   float = 150.0,
 ) -> float:
     """
     Measure decay rate (km/day, positive) from the numerical propagator.
@@ -226,7 +254,7 @@ def decay_rate(
     sat        = Satrec.twoline2rv(line1, line2)
     period_min = 2 * math.pi / sat.no_kozai  # no_kozai in rad/min
 
-    t, h   = propagate(line1, line2, days=days, step_s=step_s, Cd=Cd, Am=Am)
+    t, h   = propagate(line1, line2, days=days, step_s=step_s, Cd=Cd, Am=Am, f107=f107)
     ot, oa = _orbit_average(t, h, period_min, step_s)
     slope  = np.polyfit(ot, oa, 1)[0]         # km/day  (negative = decaying)
     return max(-slope, 0.005)
@@ -242,6 +270,7 @@ def comparison_figure(
     days:   float = 7.0,
     Cd:     float = 2.2,
     Am:     float = 0.010,
+    f107:   float = 150.0,
 ) -> plt.Figure:
     """
     Two-panel comparison:
@@ -270,7 +299,7 @@ def comparison_figure(
 
     # ── Custom propagator ─────────────────────────────────────────────────
     t_num, h_num = propagate(line1, line2, days=days,
-                             step_s=step_s, Cd=Cd, Am=Am)
+                             step_s=step_s, Cd=Cd, Am=Am, f107=f107)
 
     # ── Orbit-averaged decay ──────────────────────────────────────────────
     ot_s, oa_s = _orbit_average(t_sgp4, h_sgp4, period_min, step_s)
@@ -282,10 +311,11 @@ def comparison_figure(
     # ── Figure ────────────────────────────────────────────────────────────
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
     fig.patch.set_facecolor("white")
+    solar_label = ("solar min" if f107 < 100 else "solar max" if f107 > 200 else "mean solar")
     fig.suptitle(
         f"Propagator Comparison — {name}\n"
         f"SGP4 (B*-calibrated)  vs  Custom RK45  (two-body + J2 + drag,  "
-        f"Cd = {Cd},  A/m = {Am} m²/kg)",
+        f"Cd = {Cd},  A/m = {Am} m²/kg,  F10.7 = {f107:.0f} SFU [{solar_label}])",
         fontsize=10, fontweight="bold",
     )
 
@@ -346,8 +376,9 @@ def comparison_figure(
         f"  → implied Cd·A/m ≈ {CdAm_bstar:.4f} m²/kg\n"
         f"RK45 assumed Cd·A/m = {Cd * Am:.4f} m²/kg\n"
         f"Decay-rate agreement: {match_pct:.0f}%\n"
+        f"F10.7 = {f107:.0f} SFU  [{solar_label}  ·  ref 150 SFU]\n"
         f"Initial state: SGP4 at TLE epoch  ·  Frame: TEME\n"
-        f"Atmosphere: USSA76 piecewise exponential (mean solar)\n"
+        f"Atmosphere: USSA76 × F10.7 scaling (empirical β per altitude band)\n"
         f"Integrator: RK45  rtol=1e-6  atol=1e-7  max_step=60 s",
         transform=ax2.transAxes,
         fontsize=7.5, verticalalignment="bottom",
