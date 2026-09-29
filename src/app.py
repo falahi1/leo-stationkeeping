@@ -958,8 +958,8 @@ else:
     })
 
     # ---- Analysis tabs ----
-    tab_about, tab_alt, tab_gt, tab_globe, tab_sk = st.tabs(
-        ["About", "Altitude Decay", "Ground Track", "3D Globe", "Stationkeeping"]
+    tab_about, tab_alt, tab_gt, tab_globe, tab_sk, tab_docs = st.tabs(
+        ["About", "Altitude Decay", "Ground Track", "3D Globe", "Stationkeeping", "How it works"]
     )
 
     # --- Tab 0: About ---
@@ -1572,6 +1572,211 @@ else:
                 "<div class='plot-placeholder'>Set parameters above and click Run Simulation</div>",
                 unsafe_allow_html=True,
             )
+
+    # ── Tab: How it works ──────────────────────────────────────────────────
+    with tab_docs:
+        st.markdown(
+            "<h2 style='color:#e8eaf6;margin-bottom:4px;'>How it works</h2>"
+            "<p style='color:#5c6280;font-size:0.85rem;margin-top:0;'>Physics pipeline, data sources, and key assumptions</p>",
+            unsafe_allow_html=True,
+        )
+
+        # ── Overview card ────────────────────────────────────────────────
+        st.markdown(
+            "<div style='background:#13151f;border:1px solid #1e2130;border-radius:10px;"
+            "padding:18px 24px;margin-bottom:20px;'>"
+            "<p style='color:#a8adc0;font-size:0.92rem;line-height:1.65;margin:0;'>"
+            "This app propagates a real satellite's Two-Line Element (TLE) set forward in time, "
+            "measures the orbital decay rate, and simulates a deadband stationkeeping strategy "
+            "— the same technique operators use to decide when and how hard to fire thrusters. "
+            "All physics runs locally in Python; no external APIs are called during simulation.</p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        # ── Section helper ───────────────────────────────────────────────
+        def _section(title):
+            st.markdown(
+                f"<p style='font-size:0.7rem;letter-spacing:2px;text-transform:uppercase;"
+                f"color:#5c6280;margin:20px 0 10px 0;border-bottom:1px solid #1e2130;"
+                f"padding-bottom:6px;'>{title}</p>",
+                unsafe_allow_html=True,
+            )
+
+        # ── Data pipeline ────────────────────────────────────────────────
+        _section("1 · Data pipeline")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(
+                "<div style='background:#13151f;border:1px solid #1e2130;border-radius:8px;padding:16px;'>"
+                "<p style='color:#00b4d8;font-weight:700;font-size:0.88rem;margin:0 0 8px 0;'>TLE fetch</p>"
+                "<p style='color:#a8adc0;font-size:0.82rem;line-height:1.6;margin:0;'>"
+                "Two-Line Element sets fetched live from <strong style='color:#e8eaf6;'>Space-Track.org</strong> "
+                "(USSPACECOM authoritative catalogue). "
+                "A 30-day epoch filter removes deorbited objects. "
+                "Fallback: hardcoded ÑuSat TLE if the network is unavailable.</p>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+        with col2:
+            st.markdown(
+                "<div style='background:#13151f;border:1px solid #1e2130;border-radius:8px;padding:16px;'>"
+                "<p style='color:#00b4d8;font-weight:700;font-size:0.88rem;margin:0 0 8px 0;'>SGP4 propagation</p>"
+                "<p style='color:#a8adc0;font-size:0.82rem;line-height:1.6;margin:0;'>"
+                "The <code style='color:#c8cfe0;background:#0d0f1a;padding:1px 4px;border-radius:3px;'>sgp4</code> "
+                "Python library (Vallado implementation) propagates the TLE through 7 days at 60-second steps. "
+                "ECI positions are converted to geodetic altitude using the WGS-84 ellipsoid. "
+                "Orbit-averaged altitude gives the smooth decay curve.</p>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+        with col3:
+            st.markdown(
+                "<div style='background:#13151f;border:1px solid #1e2130;border-radius:8px;padding:16px;'>"
+                "<p style='color:#00b4d8;font-weight:700;font-size:0.88rem;margin:0 0 8px 0;'>Decay rate</p>"
+                "<p style='color:#a8adc0;font-size:0.82rem;line-height:1.6;margin:0;'>"
+                "Primary: linear fit to 30 days of TLE history from Space-Track <em>gp_history</em> — "
+                "semi-major axis derived from each TLE's mean motion "
+                "(n → a = (μ/n²)^⅓). "
+                "Fallback: 7-day SGP4 linear fit. "
+                "Both methods return km/day.</p>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+        # ── Simulation physics ───────────────────────────────────────────
+        _section("2 · Simulation physics")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(
+                "<div style='background:#13151f;border:1px solid #1e2130;border-radius:8px;padding:16px;margin-bottom:12px;'>"
+                "<p style='color:#00b4d8;font-weight:700;font-size:0.88rem;margin:0 0 8px 0;'>Stationkeeping (Phase 2)</p>"
+                "<p style='color:#a8adc0;font-size:0.82rem;line-height:1.6;margin:0;'>"
+                "Deadband strategy: the simulation runs day-by-day, applying the measured decay rate. "
+                "When altitude falls below the lower deadband boundary a Hohmann transfer raises it back to target. "
+                "Each burn uses the exact two-impulse ΔV formula (vis-viva), and propellant is "
+                "computed via the Tsiolkovsky rocket equation  (Δm = m₀·(1 − e^(−ΔV/v_e))). "
+                "Burn duration = Δm·v_e / F. "
+                "A solar-activity multiplier scales the decay rate across the solar cycle.</p>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                "<div style='background:#13151f;border:1px solid #1e2130;border-radius:8px;padding:16px;'>"
+                "<p style='color:#00b4d8;font-weight:700;font-size:0.88rem;margin:0 0 8px 0;'>Hohmann ΔV</p>"
+                "<p style='color:#a8adc0;font-size:0.82rem;line-height:1.6;margin:0;'>"
+                "Transfer from circular orbit r₁ to r₂:"
+                "<br><code style='color:#c8cfe0;background:#0d0f1a;padding:2px 6px;border-radius:3px;font-size:0.80rem;'>"
+                "Δv₁ = √(μ/r₁)·(√(2r₂/(r₁+r₂)) − 1)"
+                "</code><br>"
+                "<code style='color:#c8cfe0;background:#0d0f1a;padding:2px 6px;border-radius:3px;font-size:0.80rem;'>"
+                "Δv₂ = √(μ/r₂)·(1 − √(2r₁/(r₁+r₂)))"
+                "</code></p>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+        with c2:
+            st.markdown(
+                "<div style='background:#13151f;border:1px solid #1e2130;border-radius:8px;padding:16px;margin-bottom:12px;'>"
+                "<p style='color:#00b4d8;font-weight:700;font-size:0.88rem;margin:0 0 8px 0;'>Custom RK45 propagator</p>"
+                "<p style='color:#a8adc0;font-size:0.82rem;line-height:1.6;margin:0;'>"
+                "A numerical propagator integrates the equations of motion with three force terms: "
+                "<strong style='color:#e8eaf6;'>two-body gravity</strong>, "
+                "<strong style='color:#e8eaf6;'>J2 oblateness</strong> (Earth's equatorial bulge), and "
+                "<strong style='color:#e8eaf6;'>atmospheric drag</strong> (USSA76 density model, F10.7-scaled). "
+                "Integrator: <code style='color:#c8cfe0;background:#0d0f1a;padding:1px 4px;border-radius:3px;'>scipy.integrate.solve_ivp</code> "
+                "(RK45, rtol=10⁻⁶). "
+                "The Propagator tab lets you tune C_D·A/m and solar flux to match SGP4.</p>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                "<div style='background:#13151f;border:1px solid #1e2130;border-radius:8px;padding:16px;'>"
+                "<p style='color:#00b4d8;font-weight:700;font-size:0.88rem;margin:0 0 8px 0;'>F10.7 atmospheric scaling</p>"
+                "<p style='color:#a8adc0;font-size:0.82rem;line-height:1.6;margin:0;'>"
+                "Solar EUV heats the upper atmosphere, expanding it and increasing drag. "
+                "The USSA76 model is calibrated at F10.7 ≈ 150 SFU (mean solar). "
+                "Scaling applied: ρ = ρ_USSA76 · exp(β · (F10.7 − 150)), "
+                "where β ranges from 0.006 at 300 km to 0.020 at 700 km. "
+                "Live F10.7 is fetched from NOAA SWPC on first use.</p>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+        # ── Satellite specs ──────────────────────────────────────────────
+        _section("3 · Satellite specifications")
+        specs_html = (
+            "<div style='overflow-x:auto;'>"
+            "<table style='border-collapse:collapse;width:100%;font-size:0.82rem;'>"
+            "<thead><tr>"
+            + "".join(
+                f"<th style='text-align:left;padding:7px 12px;color:#5c6280;"
+                f"font-size:0.68rem;letter-spacing:1.5px;text-transform:uppercase;"
+                f"border-bottom:1px solid #1e2130;'>{h}</th>"
+                for h in ["Constellation", "Wet mass", "Propulsion", "Isp", "Thrust", "Geometry", "A/m"]
+            )
+            + "</tr></thead><tbody>"
+        )
+        sat_rows = [
+            ("Satellogic ÑuSat", "40 kg", "Cold gas (N₂)", "65 s", "0.5 N", "0.45 × 0.45 × 0.70 m", "0.010 m²/kg"),
+            ("Planet Dove", "5.8 kg", "Cold gas (Dove+)", "60 s", "0.1 N", "0.10 × 0.10 × 0.30 m (3U)", "0.006 m²/kg"),
+            ("Spire LEMUR-2", "4.5 kg", "Cold gas", "55 s", "0.1 N", "0.10 × 0.10 × 0.30 m (3U)", "0.008 m²/kg"),
+            ("ISS", "420 000 kg", "UDMH/N₂O₄", "310 s", "400 N", "~73 m wingspan", "0.006 m²/kg"),
+        ]
+        for i, row in enumerate(sat_rows):
+            bg = "#13151f" if i % 2 == 0 else "#0d0f1a"
+            specs_html += (
+                f"<tr style='background:{bg};'>"
+                + "".join(
+                    f"<td style='padding:7px 12px;color:#a8adc0;border-bottom:1px solid #1a1c2b;'>{v}</td>"
+                    for v in row
+                )
+                + "</tr>"
+            )
+        specs_html += "</tbody></table></div>"
+        st.markdown(specs_html, unsafe_allow_html=True)
+
+        # ── Key assumptions ──────────────────────────────────────────────
+        _section("4 · Key assumptions & limitations")
+        a1, a2 = st.columns(2)
+        with a1:
+            st.markdown(
+                "<ul style='color:#a8adc0;font-size:0.83rem;line-height:1.75;padding-left:18px;margin:0;'>"
+                "<li>Decay rate assumed constant over the simulation window (weeks–months)</li>"
+                "<li>Stationkeeping burns are instantaneous (impulsive ΔV)</li>"
+                "<li>Only altitude (semi-major axis) is controlled — no inclination or RAAN corrections</li>"
+                "<li>USSA76 density model is static; NRLMSISE-00 would be more accurate</li>"
+                "</ul>",
+                unsafe_allow_html=True,
+            )
+        with a2:
+            st.markdown(
+                "<ul style='color:#a8adc0;font-size:0.83rem;line-height:1.75;padding-left:18px;margin:0;'>"
+                "<li>Satellite mass assumed constant between burns (propellant mass is small)</li>"
+                "<li>J2 precession changes RAAN and argument of perigee — not fed back into decay</li>"
+                "<li>No conjunction screening or exclusion zones modelled</li>"
+                "<li>Thruster specs are from public documentation; actual values may differ</li>"
+                "</ul>",
+                unsafe_allow_html=True,
+            )
+
+        # ── Links ────────────────────────────────────────────────────────
+        _section("5 · Source & further reading")
+        st.markdown(
+            "<p style='color:#a8adc0;font-size:0.85rem;line-height:1.8;'>"
+            "Full source code, derivations, and session notes: "
+            "<a href='https://github.com/falahi1/leo-stationkeeping' target='_blank' "
+            "style='color:#00b4d8;text-decoration:none;font-weight:600;'>github.com/falahi1/leo-stationkeeping</a>"
+            "<br>TLE data: "
+            "<a href='https://www.space-track.org' target='_blank' style='color:#00b4d8;text-decoration:none;'>Space-Track.org</a>"
+            " (USSPACECOM / 18th Space Control Squadron)"
+            "<br>F10.7 solar flux: "
+            "<a href='https://www.swpc.noaa.gov' target='_blank' style='color:#00b4d8;text-decoration:none;'>NOAA Space Weather Prediction Center</a>"
+            "<br>SGP4 reference: Vallado et al., <em>Revisiting Spacetrack Report #3</em> (2006)"
+            "</p>",
+            unsafe_allow_html=True,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Footer
