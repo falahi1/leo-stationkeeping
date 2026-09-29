@@ -950,6 +950,13 @@ else:
 
     st.divider()
 
+    # Specs available to all tabs (propagator uses est_Am; stationkeeping uses isp_s etc.)
+    specs = SATELLITE_SPECS.get(family_key, {
+        "wet_mass_kg": 50.0, "isp_s": 220, "thrust_n": 1.0,
+        "prop_type": "—", "source": "generic defaults",
+        "est_Am": 0.010, "dims": "unknown", "mean_area_m2": 0.1,
+    })
+
     # ---- Analysis tabs ----
     tab_about, tab_alt, tab_gt, tab_globe, tab_sk = st.tabs(
         ["About", "Altitude Decay", "Ground Track", "3D Globe", "Stationkeeping"]
@@ -1375,11 +1382,6 @@ else:
         alt_default = int(round(info["alt_km"]))
         alt_min     = max(200, alt_default - 50)
         alt_max     = alt_default + 50
-
-        specs = SATELLITE_SPECS.get(family_key, {
-            "wet_mass_kg": 50.0, "isp_s": 220,
-            "prop_type": "—", "source": "generic defaults",
-        })
 
         # Seed session state from specs on first render (before sliders are drawn)
         if "sk_isp" not in st.session_state:
