@@ -395,6 +395,21 @@ def run(
 # ---------------------------------------------------------------------------
 # Standalone entry point — uses hardcoded demo values
 # ---------------------------------------------------------------------------
+def _specs_for(name: str) -> dict:
+    """Return propulsion specs based on satellite name."""
+    n = name.upper()
+    if "NUSAT" in n or "ÑUSAT" in n:
+        return dict(isp=65,     wet_mass=40.0,     thrust_n=0.5,   target_alt=437.0)
+    if "FLOCK" in n:
+        return dict(isp=60,     wet_mass=5.8,      thrust_n=0.1,   target_alt=450.0)
+    if "LEMUR" in n:
+        return dict(isp=55,     wet_mass=4.5,      thrust_n=0.1,   target_alt=500.0)
+    if "ISS" in n or "ZARYA" in n:
+        return dict(isp=310,    wet_mass=420000.0, thrust_n=400.0, target_alt=408.0)
+    # generic fallback
+    return dict(isp=220,        wet_mass=50.0,     thrust_n=1.0,   target_alt=500.0)
+
+
 def main():
     from phase1_altitude_plot import fetch_first_tle, CELESTRAK_URL, FALLBACK_TLE
     print("Fetching TLE from CelesTrak...")
@@ -406,15 +421,18 @@ def main():
         name, line1, line2 = result
         print(f"  Found: {name}")
 
-    # Defaults match Satellogic ÑuSat (cold gas N₂, ~40 kg, ~437 km SSO)
+    specs = _specs_for(name)
+    print(f"  Specs: isp={specs['isp']} s  mass={specs['wet_mass']} kg  "
+          f"thrust={specs['thrust_n']} N  target={specs['target_alt']} km")
+
     run(
         name, line1, line2,
-        target_alt=437.0,
+        target_alt=specs["target_alt"],
         half_width=5.0,
         duration=90.0,
-        isp=65.0,
-        wet_mass=40.0,
-        thrust_n=0.5,
+        isp=specs["isp"],
+        wet_mass=specs["wet_mass"],
+        thrust_n=specs["thrust_n"],
     )
 
 
