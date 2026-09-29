@@ -406,13 +406,15 @@ def main():
         name, line1, line2 = result
         print(f"  Found: {name}")
 
+    # Defaults match Satellogic ÑuSat (cold gas N₂, ~40 kg, ~437 km SSO)
     run(
         name, line1, line2,
-        target_alt=500.0,
+        target_alt=437.0,
         half_width=5.0,
         duration=90.0,
-        isp=220.0,
-        wet_mass=50.0,
+        isp=65.0,
+        wet_mass=40.0,
+        thrust_n=0.5,
     )
 
 
